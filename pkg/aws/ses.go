@@ -10,6 +10,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 )
 
+type ClientInterface interface {
+	SendEmail(ctx context.Context, params *sesv2.SendEmailInput, optFns ...func(*sesv2.Options)) (*sesv2.SendEmailOutput, error)
+}
+
 // GetClient creates an email client
 func GetClient(ctx context.Context) (*sesv2.Client, error) {
 	// Load AWS Config
@@ -29,7 +33,7 @@ func GetClient(ctx context.Context) (*sesv2.Client, error) {
 }
 
 // SendSESEmail sends an email
-func SendSESEmail(client *sesv2.Client, ctx context.Context, subject, body *string, receivers *[]string) (string, error) {
+func SendSESEmail(client ClientInterface, ctx context.Context, subject, body *string, receivers *[]string) (string, error) {
 	sender := config.GetEnv("EMAIL_SENDER")
 	input := &sesv2.SendEmailInput{
 		FromEmailAddress: aws.String(sender),
