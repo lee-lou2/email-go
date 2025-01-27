@@ -90,6 +90,8 @@ AWS_SECRET_ACCESS_KEY=your_secret_key
 # Server Settings
 SERVER_HOST=http://localhost
 SERVER_PORT=3000
+EMAIL_RATE=14
+SQS_URL=http://localhost:9324
 
 # Monitoring
 SENTRY_DSN=your_sentry_dsn
