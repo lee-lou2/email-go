@@ -194,20 +194,10 @@ func getResultCountHandler(c fiber.Ctx) error {
 		resultCounts[r.Status] = r.Count
 	}
 
-	// Get the *distinct* count of request_ids that have any result. This is the correct "Total" for results.
-	var distinctResultCount int64
-	if err := db.Model(&model.Result{}).
-		Where("request_id IN (?)", subQuery).
-		Distinct("request_id").
-		Count(&distinctResultCount).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
 	// --- Return Combined Result ---
 	return c.JSON(fiber.Map{
 		"request": requestCounts,
 		"result": fiber.Map{
-			"total":    distinctResultCount,
 			"statuses": resultCounts,
 		},
 	})
