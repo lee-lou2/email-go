@@ -117,52 +117,100 @@ func createResultEventHandler(c fiber.Ctx) error {
 
 // getResultCountHandler Retrieve email delivery results as counts
 func getResultCountHandler(c fiber.Ctx) error {
-	// Get the topicId from the URL parameters
-	topicId := c.Params("topicId")
-	if topicId == "" {
+	topicID := c.Params("topicId")
+	if topicID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "topicId is required"})
 	}
 
 	db := config.GetDB()
 
-	// Get the number of emails by status
-	var results []struct {
+	// Check if any requests exist for the given topicID.  Early exit if none.
+	var requestCount int64
+	if err := db.Model(&model.Request{}).Where("topic_id = ?", topicID).Count(&requestCount).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	if requestCount == 0 {
+		return c.JSON(fiber.Map{
+			"request": fiber.Map{"total": 0, "created": 0, "sent": 0, "failed": 0, "stopped": 0},
+			"result":  fiber.Map{"total": 0, "statuses": map[string]int{}},
+		})
+	}
+
+	// --- Request Counts (Efficient Single Query) ---
+	var requestResults []struct {
 		Status int
 		Count  int
 	}
-
-	err := db.Model(&model.Request{}).
+	if err := db.Model(&model.Request{}).
 		Select("status, COUNT(*) as count").
-		Where("topic_id = ?", topicId).
+		Where("topic_id = ?", topicID).
 		Group("status").
-		Scan(&results).Error
-	if err != nil {
+		Scan(&requestResults).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Return the result
-	var counts struct {
+	requestCounts := struct {
 		Total   int `json:"total"`
 		Created int `json:"created"`
 		Sent    int `json:"sent"`
 		Failed  int `json:"failed"`
 		Stopped int `json:"stopped"`
-	}
+	}{Total: int(requestCount)} // Initialize Total with requestCount
 
-	for _, r := range results {
+	for _, r := range requestResults {
 		switch r.Status {
 		case model.EmailMessageStatusCreated:
-			counts.Created = r.Count
+			requestCounts.Created = r.Count
 		case model.EmailMessageStatusSent:
-			counts.Sent = r.Count
+			requestCounts.Sent = r.Count
 		case model.EmailMessageStatusFailed:
-			counts.Failed = r.Count
+			requestCounts.Failed = r.Count
 		case model.EmailMessageStatusStopped:
-			counts.Stopped = r.Count
+			requestCounts.Stopped = r.Count
 		}
-		counts.Total += r.Count
 	}
-	return c.JSON(counts)
+
+	// --- Result Counts (Optimized with Subquery) ---
+
+	// Use a subquery to get the distinct request IDs associated with the topicID.
+	// This is generally the most efficient approach with GORM and avoids extra Go-side processing.
+	subQuery := db.Model(&model.Request{}).Select("id").Where("topic_id = ?", topicID)
+
+	var resultResults []struct {
+		Status string
+		Count  int
+	}
+	if err := db.Model(&model.Result{}).
+		Select("status, COUNT(DISTINCT request_id) as count").
+		Where("request_id IN (?)", subQuery).
+		Group("status").
+		Scan(&resultResults).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Use a map for flexible status handling.
+	resultCounts := make(map[string]int)
+	for _, r := range resultResults {
+		resultCounts[r.Status] = r.Count
+	}
+
+	// Get the *distinct* count of request_ids that have any result. This is the correct "Total" for results.
+	var distinctResultCount int64
+	if err := db.Model(&model.Result{}).
+		Where("request_id IN (?)", subQuery).
+		Distinct("request_id").
+		Count(&distinctResultCount).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// --- Return Combined Result ---
+	return c.JSON(fiber.Map{
+		"request": requestCounts,
+		"result": fiber.Map{
+			"total":    distinctResultCount,
+			"statuses": resultCounts,
+		},
+	})
 }
 
 // getSentCountHandler Retrieve the number of emails sent within 24 hours
