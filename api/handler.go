@@ -1,9 +1,9 @@
 package api
 
 import (
+	"aws-ses-sender-go/cmd/sender"
 	"aws-ses-sender-go/config"
 	"aws-ses-sender-go/model"
-	"aws-ses-sender-go/pkg/aws"
 	"bytes"
 	"encoding/json"
 	"github.com/gofiber/fiber/v3"
@@ -15,9 +15,10 @@ import (
 	"time"
 )
 
-// produceMessageHandler Produce Message Handler
-// Handler that receives a message and sends it to the SQS queue
-func produceMessageHandler(c fiber.Ctx) error {
+// createMessageHandler Message Handler
+// Handler that receives email sending requests
+func createMessageHandler(c fiber.Ctx) error {
+	start := time.Now()
 	var reqBody struct {
 		Messages []struct {
 			TopicId string `json:"topicId"`
@@ -30,24 +31,17 @@ func produceMessageHandler(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// create a new SQS client
-	sqsClient, err := aws.NewSQSClient(c.Context())
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	for _, message := range reqBody.Messages {
+		// Request the sender to send the email
+		ctx := c.Context()
+		sender.Request(message.TopicId, message.Email, message.Subject, message.Content, ctx)
 	}
 
-	// Get the queue URL
-	queueUrl, err := sqsClient.GetOrCreateQueue(c.Context())
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	// Send messages to the queue
-	output, err := sqsClient.SendMessage(c.Context(), *queueUrl, string(c.Body()))
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-	}
-	return c.JSON(fiber.Map{"messageId": *output.MessageId})
+	// Return the result
+	return c.JSON(fiber.Map{
+		"count":   len(reqBody.Messages),
+		"elapsed": time.Since(start).String(),
+	})
 }
 
 // createOpenEventHandler Open Event Handler

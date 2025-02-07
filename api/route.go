@@ -5,7 +5,7 @@ import "github.com/gofiber/fiber/v3"
 // setV1Routes V1 Routes
 func setV1Routes(app *fiber.App) {
 	// Messages
-	app.Post("/v1/messages", produceMessageHandler)
+	app.Post("/v1/messages", createMessageHandler)
 	// Topics
 	app.Get("/v1/topics/:topicId", getResultCountHandler)
 	// Events
